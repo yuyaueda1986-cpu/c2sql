@@ -47,6 +47,20 @@ def _col_rows(d):
     return "\n".join(rows)
 
 
+def _guard_decl(d):
+    if not d["enforce"]:
+        return ""
+    return (
+        f"\n/* Capacity-guarded write (enforce_max_records). Rejects an INSERT that\n"
+        f" * would exceed {d['macro_prefix']}_MAX_RECORDS with\n"
+        f" * SQL_RDB_ERR_CAPACITY_EXCEEDED. Best-effort: the count and the write are\n"
+        f" * not performed as a single transaction. UPSERT of an existing key is\n"
+        f" * always allowed (it does not grow the table). */\n"
+        f"SqlRDBResult {d['guard_fn']}(SqlRDBHandle *h, const {d['c_struct']} *row,\n"
+        f"                       const uint8_t *null_map);\n"
+    )
+
+
 def render_header(d, src):
     guard = f"{d['macro_prefix']}_SCHEMA_H"
     return (
@@ -61,10 +75,46 @@ def render_header(d, src):
         f"/* Column definitions for table \"{d['table']}\" (deep-copied on register). */\n"
         f"extern const SqlRDBColumnDef {d['macro_prefix']}_COLS[{d['macro_prefix']}_COL_COUNT];\n\n"
         f"/* Register the \"{d['table']}\" schema (CREATE TABLE / schema check). */\n"
-        f"SqlRDBResult {d['register_fn']}(SqlRDBHandle *h);\n\n"
-        "#ifdef __cplusplus\n}\n#endif\n\n"
+        f"SqlRDBResult {d['register_fn']}(SqlRDBHandle *h);\n"
+        + _guard_decl(d)
+        + "\n#ifdef __cplusplus\n}\n#endif\n\n"
         f"#endif /* {guard} */\n"
     )
+
+
+def _guard_impl(d):
+    if not d["enforce"]:
+        return ""
+    table = d["table"]
+    mx = f"{d['macro_prefix']}_MAX_RECORDS"
+    head = (
+        f"\nSqlRDBResult {d['guard_fn']}(SqlRDBHandle *h, const {d['c_struct']} *row,\n"
+        f"                       const uint8_t *null_map) {{\n"
+        f"    if (!row) return SQL_RDB_ERR_INVALID_ARG;\n"
+        f"    size_t total = 0;\n"
+        f'    SqlRDBResult r = SqlRDBCount(h, "{table}", NULL, &total);\n'
+        f"    if (r != SQL_RDB_OK) return r;\n"
+    )
+    pk = d["pk"]
+    if pk is not None:
+        body = (
+            f"    /* An UPSERT of an existing primary key does not grow the table. */\n"
+            f'    SqlRDBCondition *pk = {pk["cond_fn"]}("{pk["name"]}", SQL_OP_EQ, row->{pk["name"]});\n'
+            f"    if (!pk) return SQL_RDB_ERR_NO_MEMORY;\n"
+            f"    size_t existing = 0;\n"
+            f'    r = SqlRDBCount(h, "{table}", pk, &existing);\n'
+            f"    SqlRDBCondFree(pk);\n"
+            f"    if (r != SQL_RDB_OK) return r;\n"
+            f"    if (existing == 0 && total >= {mx})\n"
+            f"        return SQL_RDB_ERR_CAPACITY_EXCEEDED;\n"
+        )
+    else:
+        body = (
+            f"    if (total >= {mx})\n"
+            f"        return SQL_RDB_ERR_CAPACITY_EXCEEDED;\n"
+        )
+    tail = f'    return SqlRDBWrite(h, "{table}", row, null_map);\n}}\n'
+    return head + body + tail
 
 
 def render_source(d, src):
@@ -76,6 +126,7 @@ def render_source(d, src):
         f"SqlRDBResult {d['register_fn']}(SqlRDBHandle *h) {{\n"
         f'    return SqlRDBRegisterStruct(h, "{d["table"]}", '
         f"{d['macro_prefix']}_COLS, {d['macro_prefix']}_COL_COUNT);\n}}\n"
+        + _guard_impl(d)
     )
 
 

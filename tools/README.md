@@ -52,7 +52,26 @@ tools/build_batch.sh
 - `offset` と数値型の `size` は書かない（生成器が `offsetof` / `sizeof` で補完）。
 - `text` / `blob` は `size`（バッファ長）が必須。
 - `primary_key` は最大1列。`c_struct` 省略時は `struct_name` の PascalCase。
-- `max_records` は Phase 1 ではメタデータ（`*_MAX_RECORDS` マクロ）。
+- `max_records` は既定ではメタデータ（`*_MAX_RECORDS` マクロ）。
+
+## 容量ガード（`enforce_max_records`, Phase 2 オプトイン）
+
+仕様書に `"enforce_max_records": true` を加えると、容量チェック付きの書き込み
+ラッパ `Write<Name>Guarded()` が追加生成される。
+
+```json
+{ "...": "...", "max_records": 3, "enforce_max_records": true,
+  "fields": [ { "name": "id", "type": "int32", "primary_key": true }, "..." ] }
+```
+
+生成される関数の挙動:
+
+- 新規INSERTで件数が `*_MAX_RECORDS` 以上になる場合 → `SQL_RDB_ERR_CAPACITY_EXCEEDED` を返し書き込まない。
+- 既存PKへのUPSERT（テーブルが増えない更新）は容量超過でも許可。
+- 内部で公開API `SqlRDBCount()` を用いる。ベストエフォート（カウントと書き込みは
+  非トランザクション）。厳密性が必要なら呼出側で TX で囲む。
+- 主キーの型が `blob` の場合は未対応（lint がエラーにする）。`sample` は
+  `specs/sessions.json`、テストは `tests/test_capacity.c`。
 
 ## 命名規約（生成される識別子）
 
@@ -65,6 +84,7 @@ tools/build_batch.sh
 | 列数マクロ | `PERSONS_COL_COUNT` |
 | 最大件数マクロ | `PERSONS_MAX_RECORDS` |
 | 登録ヘルパ | `RegisterPersons()` |
+| 容量ガード（enforce時） | `WritePersonsGuarded()` |
 | CMakeターゲット | `persons_schema` |
 
 生成物は `DO NOT EDIT` ヘッダ付き。スキーマを変えるときは仕様書を編集して

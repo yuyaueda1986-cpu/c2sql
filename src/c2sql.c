@@ -829,6 +829,67 @@ SqlRDBResult SqlRDBDelete(SqlRDBHandle *h, const char *struct_name,
 }
 
 /* ------------------------------------------------------------------ */
+/* SqlRDBCount — read-only COUNT(*) with optional condition            */
+/* ------------------------------------------------------------------ */
+
+SqlRDBResult SqlRDBCount(SqlRDBHandle *h, const char *struct_name,
+                          const SqlRDBCondition *cond, size_t *out_count) {
+    if (!c2sql_handle_valid(h)) return SQL_RDB_ERR_INVALID_HANDLE;
+    if (!struct_name || !out_count) return SQL_RDB_ERR_INVALID_ARG;
+    /* cond may be NULL: counting is non-destructive, so NULL == count all. */
+
+    c2sql_internal_mutex_lock(&h->mutex);
+
+    const SqlRDBSchema *schema = c2sql_internal_schema_lookup(h, struct_name);
+    if (!schema) {
+        c2sql_internal_err_set(&h->error, SQL_RDB_ERR_UNKNOWN_STRUCT,
+                               "Count: unknown struct '%s'", struct_name);
+        c2sql_internal_mutex_unlock(&h->mutex);
+        return SQL_RDB_ERR_UNKNOWN_STRUCT;
+    }
+
+    char *sql = NULL;
+    SqlRDBQuerySpec spec = { .op = C2SQL_QB_COUNT, .schema = schema,
+                              .cond = cond, .new_col = NULL };
+    SqlRDBResult r = c2sql_internal_qb_build(&spec, &sql, NULL);
+    if (r != SQL_RDB_OK) {
+        c2sql_internal_mutex_unlock(&h->mutex);
+        return r;
+    }
+
+    void *stmt  = NULL;
+    bool  owned = false;
+    r = get_or_prepare(h, sql, &stmt, &owned);
+    free(sql);
+    if (r != SQL_RDB_OK) {
+        c2sql_internal_mutex_unlock(&h->mutex);
+        return r;
+    }
+
+    if (cond && cond->kind != COND_ALL) {
+        int idx = 1;
+        r = bind_cond_values(h->driver, stmt, cond, &idx);
+        if (r != SQL_RDB_OK) {
+            release_cached_stmt(h, stmt, owned);
+            c2sql_internal_mutex_unlock(&h->mutex);
+            return r;
+        }
+    }
+
+    bool has_row = false;
+    r = h->driver->step(stmt, &has_row);
+    if (r == SQL_RDB_OK && has_row) {
+        int64_t n = 0;
+        r = h->driver->column_int64(stmt, 0, &n);
+        if (r == SQL_RDB_OK) *out_count = (n >= 0) ? (size_t)n : 0;
+    }
+    release_cached_stmt(h, stmt, owned);
+
+    c2sql_internal_mutex_unlock(&h->mutex);
+    return r;
+}
+
+/* ------------------------------------------------------------------ */
 /* Task 11.1: Transaction control                                      */
 /*                                                                     */
 /* State model (Req 10.1〜10.6):                                       */

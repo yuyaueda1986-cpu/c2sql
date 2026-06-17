@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "struct_name": "sessions",
+  "c_struct": "Session",
+  "backend": "sqlite3",
+  "max_records": 3,
+  "enforce_max_records": true,
+  "fields": [
+    { "name": "id",    "type": "int32", "primary_key": true },
+    { "name": "token", "type": "text",  "size": 64 }
+  ]
+}

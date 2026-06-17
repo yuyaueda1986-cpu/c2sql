@@ -15,6 +15,21 @@ VAR_SIZED_TYPES = {"text", "blob"}  # size 必須
 SCALAR_TYPES = {"int32", "int64", "real"}  # size を取らない
 SUPPORTED_BACKENDS = {"sqlite3"}  # postgres は将来
 
+TOP_LEVEL_KEYS = {
+    "schema_version", "struct_name", "c_struct", "backend",
+    "max_records", "enforce_max_records", "fields",
+}
+FIELD_KEYS = {"name", "type", "size", "primary_key", "nullable", "unique"}
+
+# 容量ガード(enforce_max_records)で主キー一致を判定する際の条件コンストラクタ。
+# blob は等値条件の生成対象外（ガードでは非対応）。
+PK_COND_FN = {
+    "int32": "SqlRDBCondInt",
+    "int64": "SqlRDBCondInt",
+    "real":  "SqlRDBCondReal",
+    "text":  "SqlRDBCondText",
+}
+
 # libc2sql の識別子検証が拒否する SQL 予約語の代表例（lint で早期検出する）。
 RESERVED_WORDS = {
     "select", "insert", "update", "delete", "from", "where", "table",
@@ -70,8 +85,16 @@ def validate(spec):
     if not isinstance(spec, dict):
         raise SpecError(["仕様のトップレベルはオブジェクトである必要があります"])
 
+    unknown_top = set(spec) - TOP_LEVEL_KEYS
+    if unknown_top:
+        errors.append(f"未知のトップレベルキー（誤記？）: {sorted(unknown_top)}")
+
     if spec.get("schema_version") != "1.0":
         errors.append("schema_version は \"1.0\" を指定してください")
+
+    if "enforce_max_records" in spec and not isinstance(
+            spec["enforce_max_records"], bool):
+        errors.append("enforce_max_records は真偽値で指定してください")
 
     _check_ident(spec.get("struct_name"), "struct_name", errors)
 
@@ -95,6 +118,7 @@ def validate(spec):
     if len(fields) > MAX_COLUMNS:
         errors.append(f"カラム数が上限{MAX_COLUMNS}を超えています: {len(fields)}")
 
+    enforce = bool(spec.get("enforce_max_records"))
     seen = set()
     pk_count = 0
     for i, f in enumerate(fields):
@@ -102,6 +126,10 @@ def validate(spec):
         if not isinstance(f, dict):
             errors.append(f"{loc}: オブジェクトである必要があります")
             continue
+
+        unknown_field = set(f) - FIELD_KEYS
+        if unknown_field:
+            errors.append(f"{loc}: 未知のキー（誤記？）: {sorted(unknown_field)}")
 
         name = f.get("name")
         _check_ident(name, f"{loc}.name", errors)
@@ -125,6 +153,9 @@ def validate(spec):
             pk_count += 1
             if f.get("nullable"):
                 errors.append(f"{loc}: primary_key 列は nullable にできません")
+            if enforce and ftype == "blob":
+                errors.append(
+                    f"{loc}: enforce_max_records では blob 主キーは未対応です")
 
     if pk_count > 1:
         errors.append(f"primary_key は最大1列です（{pk_count}列指定）")
@@ -144,6 +175,7 @@ def derive(spec):
     macro_prefix = struct_name.upper()
 
     cols = []
+    pk = None
     for f in spec["fields"]:
         c_scalar, arr_base, sql_type = TYPE_INFO[f["type"]]
         flags = []
@@ -161,12 +193,18 @@ def derive(spec):
             "size": f.get("size"),      # set for text/blob
             "flags": " | ".join(flags) if flags else "SQL_COL_FLAG_NONE",
         })
+        if f.get("primary_key"):
+            pk = {"name": f["name"], "cond_fn": PK_COND_FN.get(f["type"])}
 
+    pascal = _pascal(struct_name)
     return {
         "table": struct_name,
         "c_struct": c_struct,
         "macro_prefix": macro_prefix,
-        "register_fn": "Register" + _pascal(struct_name),
+        "register_fn": "Register" + pascal,
+        "guard_fn": "Write" + pascal + "Guarded",
+        "enforce": bool(spec.get("enforce_max_records")),
+        "pk": pk,                       # None when no primary key
         "max_records": spec["max_records"],
         "col_count": len(spec["fields"]),
         "cols": cols,

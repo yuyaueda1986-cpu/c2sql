@@ -304,6 +304,24 @@ static SqlRDBResult build_select(const SqlRDBQuerySpec *spec, Buf *b,
     return SQL_RDB_OK;
 }
 
+static SqlRDBResult build_count(const SqlRDBQuerySpec *spec, Buf *b,
+                                size_t *bind_count) {
+    const SqlRDBSchema    *s    = spec->schema;
+    const SqlRDBCondition *cond = spec->cond;
+
+    if (!buf_append(b, "SELECT COUNT(*) FROM \"")) return SQL_RDB_ERR_NO_MEMORY;
+    if (!buf_append(b, s->name))                   return SQL_RDB_ERR_NO_MEMORY;
+    if (!buf_append(b, "\""))                      return SQL_RDB_ERR_NO_MEMORY;
+
+    if (cond_needs_where(cond)) {
+        SqlRDBResult vr = validate_cond_columns(cond, s);
+        if (vr != SQL_RDB_OK) return vr;
+        if (!buf_append(b, " WHERE "))             return SQL_RDB_ERR_NO_MEMORY;
+        if (!append_cond(b, cond, bind_count))     return SQL_RDB_ERR_NO_MEMORY;
+    }
+    return SQL_RDB_OK;
+}
+
 static SqlRDBResult build_update_field(const SqlRDBQuerySpec *spec, Buf *b,
                                        size_t *bind_count) {
     const SqlRDBSchema    *s    = spec->schema;
@@ -410,6 +428,9 @@ SqlRDBResult c2sql_internal_qb_build(
             break;
         case C2SQL_QB_SELECT:
             r = build_select(spec, &b, &bind_count);
+            break;
+        case C2SQL_QB_COUNT:
+            r = build_count(spec, &b, &bind_count);
             break;
         case C2SQL_QB_DELETE:
             r = build_delete(spec, &b, &bind_count);

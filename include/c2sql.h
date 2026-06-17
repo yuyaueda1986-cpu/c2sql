@@ -52,6 +52,7 @@ typedef enum SqlRDBResult {
     SQL_RDB_ERR_NOT_FOUND        = -30,
     SQL_RDB_ERR_MULTIPLE_ROWS    = -31,
     SQL_RDB_ERR_NOT_NULL_VIOLATION = -32,
+    SQL_RDB_ERR_CAPACITY_EXCEEDED  = -33,  /**< max_records guard rejected an insert */
     SQL_RDB_ERR_NO_ACTIVE_TX     = -40,
     SQL_RDB_ERR_NESTED_TX        = -41,
     SQL_RDB_ERR_DRIVER           = -50,
@@ -269,6 +270,18 @@ SqlRDBResult SqlRDBDelete(
     const char            *struct_name,
     const SqlRDBCondition *cond,
     size_t                *out_deleted);
+
+/**
+ * Count the rows matching cond (read-only; never modifies the table).
+ * Unlike SqlRDBDelete, a NULL cond is allowed and means "count all rows"
+ * (equivalent to SqlRDBCondAll()), since counting cannot be destructive.
+ * @param out_count  Receives the number of matching rows (must be non-NULL).
+ */
+SqlRDBResult SqlRDBCount(
+    SqlRDBHandle          *h,
+    const char            *struct_name,
+    const SqlRDBCondition *cond,
+    size_t                *out_count);
 
 /* ------------------------------------------------------------------ */
 /* BLOB field auxiliary API (Req 8.5)                                  */

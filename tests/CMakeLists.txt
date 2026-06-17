@@ -77,3 +77,21 @@ if(NOT WIN32)
 endif()
 add_test(NAME concurrency_tests COMMAND test_concurrency)
 set_tests_properties(concurrency_tests PROPERTIES TIMEOUT 60)
+
+# Phase 2: SqlRDBCount + generated capacity guard, via the generated "sessions"
+# schema. Guarded by EXISTS so a checkout without generated artifacts still
+# configures (run tools/build_batch.sh to regenerate them).
+if(EXISTS ${CMAKE_SOURCE_DIR}/generated/sessions_schema.c)
+    add_executable(test_capacity test_capacity.c
+        ${CMAKE_SOURCE_DIR}/generated/sessions_schema.c)
+    target_include_directories(test_capacity PRIVATE ${CMAKE_SOURCE_DIR}/generated)
+    target_link_libraries(test_capacity PRIVATE c2sql)
+    add_test(NAME capacity_tests COMMAND test_capacity)
+endif()
+
+# Phase 2: c2sql-gen toolchain self-tests + golden-file drift check.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_FOUND)
+    add_test(NAME tools_pytests
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_tools.py)
+endif()

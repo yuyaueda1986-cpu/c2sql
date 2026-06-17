@@ -215,6 +215,48 @@ SqlRDBCondFree(all);
 
 ---
 
+## 5.5 件数カウント `SqlRDBCount`
+
+```c
+SqlRDBResult SqlRDBCount(
+    SqlRDBHandle  *h,
+    const char    *struct_name,
+    const SqlRDBCondition *cond,   /* NULL または SqlRDBCondAll() で全件 */
+    size_t        *out_count);     /* 一致件数を受け取る（NULL不可） */
+```
+
+- 読み取り専用。テーブルを変更しない。
+- `SqlRDBDelete` と異なり `cond == NULL` を許容し「全件カウント」を意味する（カウントは破壊的でないため安全弁不要）。
+- 条件中の未登録カラムは `SQL_RDB_ERR_UNKNOWN_COLUMN`。
+
+```c
+size_t total = 0;
+SqlRDBCount(h, "persons", NULL, &total);              /* 全件 */
+
+SqlRDBCondition *c = SqlRDBCondReal("score", SQL_OP_GE, 8.0);
+size_t hi = 0;
+SqlRDBCount(h, "persons", c, &hi);                    /* score>=8.0 の件数 */
+SqlRDBCondFree(c);
+```
+
+### 容量ガード（`max_records`）
+
+スキーマ仕様書（[tools/README.md](../tools/README.md)）に `"enforce_max_records": true`
+を指定して `c2sql-gen` で生成すると、容量チェック付きの書き込みラッパ
+`Write<Name>Guarded()` が生成される。
+
+```c
+/* 生成ヘッダ sessions_schema.h より */
+SqlRDBResult WriteSessionsGuarded(SqlRDBHandle *h, const Session *row,
+                                  const uint8_t *null_map);
+```
+
+- 既存PKへのUPSERT（テーブルが増えない更新）は容量超過でも許可。
+- 新規INSERTで件数が `*_MAX_RECORDS` 以上になる場合は `SQL_RDB_ERR_CAPACITY_EXCEEDED` を返し、書き込まない。
+- ベストエフォート（カウントと書き込みは単一トランザクションではない）。厳密な不変条件が必要なら、呼出側で `SqlRDBBeginTx`/`SqlRDBCommitTx` で囲む。
+
+---
+
 ## 6. 検索条件の組み立て
 
 ### リーフ条件
@@ -401,6 +443,7 @@ if (code != SQL_RDB_OK) {
 | `SQL_RDB_ERR_NOT_FOUND` | 該当行なし |
 | `SQL_RDB_ERR_MULTIPLE_ROWS` | 単一行APIで複数ヒット |
 | `SQL_RDB_ERR_NOT_NULL_VIOLATION` | NULL不許可列にNULL指定 |
+| `SQL_RDB_ERR_CAPACITY_EXCEEDED` | 容量ガード（`max_records`）がINSERTを拒否（生成ラッパ使用時） |
 | `SQL_RDB_ERR_NO_ACTIVE_TX` | Commit/Rollback時TX無し |
 | `SQL_RDB_ERR_NESTED_TX` | ネスト深度超過 |
 | `SQL_RDB_ERR_DRIVER` | バックエンドエラー（詳細は`SqlRDBLastError`） |

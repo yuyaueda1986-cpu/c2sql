@@ -11,6 +11,10 @@
       "type": "string",
       "enum": ["1.0"]
     },
+    "enforce_max_records": {
+      "description": "true で容量ガードラッパ Write<Name>Guarded() を生成する（Phase 2, オプトイン）。",
+      "type": "boolean"
+    },
     "struct_name": {
       "description": "テーブル名（SQL識別子規約）。",
       "type": "string",

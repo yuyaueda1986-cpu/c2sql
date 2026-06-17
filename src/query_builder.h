@@ -22,6 +22,7 @@ typedef enum {
     C2SQL_QB_INSERT,        /* INSERT INTO ... VALUES (...)                   */
     C2SQL_QB_UPSERT,        /* INSERT INTO ... ON CONFLICT(...) DO UPDATE     */
     C2SQL_QB_SELECT,        /* SELECT ... FROM ... [WHERE ...]                */
+    C2SQL_QB_COUNT,         /* SELECT COUNT(*) FROM ... [WHERE ...]           */
     C2SQL_QB_DELETE,        /* DELETE FROM ... [WHERE ...]                    */
     C2SQL_QB_ALTER_ADD,     /* ALTER TABLE ... ADD COLUMN ...                 */
     C2SQL_QB_UPDATE_FIELD,  /* UPDATE table SET <target_col>=? WHERE ...      */
