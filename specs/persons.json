@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "struct_name": "persons",
+  "c_struct": "Person",
+  "backend": "sqlite3",
+  "max_records": 100000,
+  "fields": [
+    { "name": "id",    "type": "int32", "primary_key": true },
+    { "name": "name",  "type": "text",  "size": 32 },
+    { "name": "score", "type": "real",  "nullable": true }
+  ]
+}

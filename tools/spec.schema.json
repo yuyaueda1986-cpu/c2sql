@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/yuyaueda1986-cpu/c2sql/tools/spec.schema.json",
+  "title": "c2sql schema specification",
+  "description": "利用者が記入し管理者へ渡すスキーマ仕様書。tools/c2sql_gen.py の入力。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "struct_name", "backend", "max_records", "fields"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "struct_name": {
+      "description": "テーブル名（SQL識別子規約）。",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "maxLength": 128
+    },
+    "c_struct": {
+      "description": "生成するC構造体型名（省略時は struct_name のPascalCase）。",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "maxLength": 128
+    },
+    "backend": {
+      "description": "対象バックエンド。現状 sqlite3 のみ（postgres は将来）。",
+      "type": "string",
+      "enum": ["sqlite3"]
+    },
+    "max_records": {
+      "description": "最大レコード数。Phase 1 ではメタデータ（容量見積り）。",
+      "type": "integer",
+      "minimum": 1
+    },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "maxLength": 128
+          },
+          "type": {
+            "type": "string",
+            "enum": ["int32", "int64", "real", "text", "blob"]
+          },
+          "size": {
+            "description": "text/blob のバッファ長（バイト）。数値型では指定しない。",
+            "type": "integer",
+            "minimum": 1
+          },
+          "primary_key": { "type": "boolean" },
+          "nullable":    { "type": "boolean" },
+          "unique":      { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

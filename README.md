@@ -98,7 +98,21 @@ include/         公開ヘッダ (c2sql.h のみ)
 src/             ライブラリ本体
 tests/           単体・統合・並行・性能テスト
 examples/        サンプルプログラム
+tools/           c2sql-gen（スキーマ仕様書→定義コード生成バッチ）
+specs/           受け渡しスキーマ仕様書（JSON）
+generated/       c2sql-gen の生成物（再生成可能・DO NOT EDIT）
 docs/            設計書および取扱説明書
 .kiro/specs/     仕様（要件・設計・タスク）
 .kiro/steering/  プロジェクトコンテキスト
 ```
+
+## コード生成バッチ（c2sql-gen）
+
+利用者から受け取ったスキーマ仕様書（JSON）を、手書き `SqlRDBColumnDef[]` を
+排した定義コードへ変換する管理者向けバッチ。詳細は[tools/README.md](tools/README.md)。
+
+```sh
+tools/build_batch.sh            # specs/*.json を lint→生成→build→test
+```
+
+生成物を使う利用者コード例は `examples/generated_crud.c`。

@@ -15,7 +15,7 @@ target_include_directories(c2sql
     PUBLIC  ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_link_libraries(c2sql PRIVATE SQLite3::SQLite3)
+target_link_libraries(c2sql PRIVATE SQLite::SQLite3)
 
 # pthread required for mutex on non-Windows
 if(NOT WIN32)
