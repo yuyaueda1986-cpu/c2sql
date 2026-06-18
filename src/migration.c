@@ -234,6 +234,146 @@ static SqlRDBResult check_strict(SqlRDBHandle *h, const char *table, bool *out_s
 }
 
 /* ------------------------------------------------------------------ */
+/* PostgreSQL introspection (information_schema / pg_catalog)          */
+/* ------------------------------------------------------------------ */
+
+/* Map an information_schema.data_type (lowercase) to an affinity class. */
+static SqlRDBType type_class_from_pg(const char *s) {
+    if (!s) return SQL_TYPE_TEXT;
+    if (strstr(s, "int"))    return SQL_TYPE_INT64;  /* integer / bigint / smallint */
+    if (strstr(s, "double") || strstr(s, "real") ||
+        strstr(s, "numeric") || strstr(s, "float")) return SQL_TYPE_REAL;
+    if (strstr(s, "bytea"))  return SQL_TYPE_BLOB;
+    return SQL_TYPE_TEXT;
+}
+
+/* Run a single-text-column query bound to ($1 = table) and collect results. */
+static SqlRDBResult pg_collect_names(SqlRDBHandle *h, const char *sql,
+                                     const char *table,
+                                     char names[][MIG_MAX_NAME], int max, int *out_n) {
+    *out_n = 0;
+    void *stmt = NULL;
+    SqlRDBResult r = h->driver->prepare(h->driver_ctx, sql, &stmt);
+    if (r != SQL_RDB_OK) return r;
+    r = h->driver->bind_text(stmt, 1, table, -1);
+    if (r != SQL_RDB_OK) { h->driver->finalize(stmt); return r; }
+    for (;;) {
+        bool has_row = false;
+        r = h->driver->step(stmt, &has_row);
+        if (r != SQL_RDB_OK || !has_row) break;
+        const char *p = NULL; size_t plen = 0;
+        h->driver->column_text(stmt, 0, &p, &plen);
+        if (p && *out_n < max && plen < MIG_MAX_NAME) {
+            memcpy(names[*out_n], p, plen);
+            names[*out_n][plen] = '\0';
+            (*out_n)++;
+        }
+    }
+    h->driver->finalize(stmt);
+    return r;
+}
+
+static SqlRDBResult read_table_info_pg(SqlRDBHandle *h, const char *table,
+                                       DbCol **out_cols, size_t *out_n) {
+    *out_cols = NULL;
+    *out_n    = 0;
+
+    const char *sql =
+        "SELECT column_name, data_type, is_nullable "
+        "FROM information_schema.columns "
+        "WHERE table_name = $1 AND table_schema = current_schema() "
+        "ORDER BY ordinal_position";
+
+    void *stmt = NULL;
+    SqlRDBResult r = h->driver->prepare(h->driver_ctx, sql, &stmt);
+    if (r != SQL_RDB_OK) return r;
+    r = h->driver->bind_text(stmt, 1, table, -1);
+    if (r != SQL_RDB_OK) { h->driver->finalize(stmt); return r; }
+
+    DbCol  *cols = NULL;
+    size_t  cap  = 0;
+    size_t  n    = 0;
+    for (;;) {
+        bool has_row = false;
+        r = h->driver->step(stmt, &has_row);
+        if (r != SQL_RDB_OK || !has_row) break;
+
+        if (n == cap) {
+            size_t new_cap = cap ? cap * 2 : 8;
+            DbCol *p = realloc(cols, new_cap * sizeof(*cols));
+            if (!p) { free(cols); h->driver->finalize(stmt); return SQL_RDB_ERR_NO_MEMORY; }
+            cols = p; cap = new_cap;
+        }
+        memset(&cols[n], 0, sizeof(cols[n]));
+        cols[n].cid = (int)n;
+
+        const char *name_p = NULL; size_t name_len = 0;
+        h->driver->column_text(stmt, 0, &name_p, &name_len);
+        if (name_p && name_len < sizeof(cols[n].name)) {
+            memcpy(cols[n].name, name_p, name_len);
+            cols[n].name[name_len] = '\0';
+        }
+
+        const char *type_p = NULL; size_t type_len = 0;
+        h->driver->column_text(stmt, 1, &type_p, &type_len);
+        char raw[40] = {0};
+        if (type_p && type_len < sizeof(raw)) { memcpy(raw, type_p, type_len); raw[type_len] = '\0'; }
+        cols[n].type_class = type_class_from_pg(raw);
+
+        const char *nn_p = NULL; size_t nn_len = 0;
+        h->driver->column_text(stmt, 2, &nn_p, &nn_len);    /* "YES" / "NO" */
+        cols[n].notnull = (nn_p && nn_len >= 2 && (nn_p[0] == 'N' || nn_p[0] == 'n'));
+
+        n++;
+    }
+    h->driver->finalize(stmt);
+    if (r != SQL_RDB_OK) { free(cols); return r; }
+
+    /* PRIMARY KEY columns. */
+    char pk_names[64][MIG_MAX_NAME];
+    int  pk_n = 0;
+    r = pg_collect_names(h,
+        "SELECT a.attname FROM pg_index i "
+        "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+        "WHERE i.indrelid = $1::regclass AND i.indisprimary",
+        table, pk_names, 64, &pk_n);
+    if (r != SQL_RDB_OK) { free(cols); return r; }
+    for (int i = 0; i < pk_n; i++)
+        for (size_t k = 0; k < n; k++)
+            if (strcmp(cols[k].name, pk_names[i]) == 0) cols[k].pk = true;
+
+    /* Single-column UNIQUE constraints (excluding the primary key). */
+    char uq_names[64][MIG_MAX_NAME];
+    int  uq_n = 0;
+    r = pg_collect_names(h,
+        "SELECT a.attname FROM pg_index i "
+        "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+        "WHERE i.indrelid = $1::regclass AND i.indisunique AND NOT i.indisprimary "
+        "AND array_length(i.indkey, 1) = 1",
+        table, uq_names, 64, &uq_n);
+    if (r != SQL_RDB_OK) { free(cols); return r; }
+    for (int i = 0; i < uq_n; i++)
+        for (size_t k = 0; k < n; k++)
+            if (strcmp(cols[k].name, uq_names[i]) == 0) cols[k].is_unique = true;
+
+    *out_cols = cols;
+    *out_n    = n;
+    return SQL_RDB_OK;
+}
+
+/* Read existing columns for either backend (SQLite PRAGMA or PG catalogs). */
+static SqlRDBResult read_existing(SqlRDBHandle *h, const char *table,
+                                  DbCol **cols, size_t *n) {
+    if (h->driver->dialect == C2SQL_DIALECT_POSTGRES)
+        return read_table_info_pg(h, table, cols, n);
+    SqlRDBResult r = read_table_info(h, table, cols, n);
+    if (r != SQL_RDB_OK) return r;
+    r = apply_unique_flags(h, table, *cols, *n);
+    if (r != SQL_RDB_OK) { free(*cols); *cols = NULL; *n = 0; }
+    return r;
+}
+
+/* ------------------------------------------------------------------ */
 /* Comparison                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -258,7 +398,8 @@ static int compare_columns(const SqlRDBColumnDef *sc, const DbCol *dc) {
 SqlRDBResult c2sql_internal_migrate_table(SqlRDBHandle *h, const SqlRDBSchema *schema) {
     /* CREATE TABLE IF NOT EXISTS — idempotent for existing tables. */
     char           *create_sql = NULL;
-    SqlRDBQuerySpec cspec      = { .op = C2SQL_QB_CREATE, .schema = schema };
+    SqlRDBQuerySpec cspec      = { .op = C2SQL_QB_CREATE, .schema = schema,
+                                   .dialect = h->driver->dialect };
     SqlRDBResult    r          = c2sql_internal_qb_build(&cspec, &create_sql, NULL);
     if (r != SQL_RDB_OK) return r;
     r = h->driver->exec(h->driver_ctx, create_sql);
@@ -272,18 +413,17 @@ SqlRDBResult c2sql_internal_migrate_table(SqlRDBHandle *h, const SqlRDBSchema *s
     /* Read existing layout (must always be populated after CREATE). */
     DbCol *db_cols = NULL;
     size_t db_n    = 0;
-    r = read_table_info(h, schema->name, &db_cols, &db_n);
+    r = read_existing(h, schema->name, &db_cols, &db_n);
     if (r != SQL_RDB_OK) { free(db_cols); return r; }
     if (db_n == 0) { free(db_cols); return SQL_RDB_ERR_INTERNAL; }
 
-    r = apply_unique_flags(h, schema->name, db_cols, db_n);
-    if (r != SQL_RDB_OK) { free(db_cols); return r; }
-
     /* STRICT detection: warn (or reject if require_strict) but do not abort here
      * — let the column-by-column comparison run too so the error reflects the
-     * primary failure cause. */
-    bool is_strict = false;
-    check_strict(h, schema->name, &is_strict);
+     * primary failure cause. PostgreSQL is statically typed, so it is always
+     * treated as STRICT (the keyword is SQLite-only). */
+    bool is_strict = (h->driver->dialect == C2SQL_DIALECT_POSTGRES);
+    if (h->driver->dialect != C2SQL_DIALECT_POSTGRES)
+        check_strict(h, schema->name, &is_strict);
     if (!is_strict) {
         if (h->config.require_strict) {
             c2sql_internal_err_set(&h->error, SQL_RDB_ERR_SCHEMA_MISMATCH,
@@ -332,6 +472,7 @@ SqlRDBResult c2sql_internal_migrate_table(SqlRDBHandle *h, const SqlRDBSchema *s
                 .op      = C2SQL_QB_ALTER_ADD,
                 .schema  = schema,
                 .new_col = &new_col,
+                .dialect = h->driver->dialect,
             };
             r = c2sql_internal_qb_build(&aspec, &alter_sql, NULL);
             if (r != SQL_RDB_OK) { free(db_cols); return r; }
@@ -349,9 +490,7 @@ SqlRDBResult c2sql_internal_migrate_table(SqlRDBHandle *h, const SqlRDBSchema *s
         free(db_cols);
         db_cols = NULL;
         db_n    = 0;
-        r = read_table_info(h, schema->name, &db_cols, &db_n);
-        if (r != SQL_RDB_OK) { free(db_cols); return r; }
-        r = apply_unique_flags(h, schema->name, db_cols, db_n);
+        r = read_existing(h, schema->name, &db_cols, &db_n);
         if (r != SQL_RDB_OK) { free(db_cols); return r; }
 
         if (db_n != schema->col_count) {

@@ -204,6 +204,7 @@ static SqlRDBResult sqlite_finalize(void *stmt) {
 
 const SqlRDBDriver g_sqlite3_driver = {
     .name         = "sqlite3",
+    .dialect      = C2SQL_DIALECT_SQLITE,
     .open         = sqlite_open,
     .close        = sqlite_close,
     .exec         = sqlite_exec,

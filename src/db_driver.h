@@ -17,8 +17,19 @@
 #include <stdbool.h>
 #include "c2sql.h"
 
+/*
+ * SQL dialect produced by the query builder for a given backend.
+ * Carried on the driver vtable so the builder can branch on type names,
+ * placeholder syntax ('?' vs '$N'), and the STRICT suffix.
+ */
+typedef enum {
+    C2SQL_DIALECT_SQLITE   = 0,
+    C2SQL_DIALECT_POSTGRES = 1
+} C2SqlDialect;
+
 typedef struct SqlRDBDriver {
-    const char *name;
+    const char  *name;
+    C2SqlDialect dialect;
 
     SqlRDBResult (*open)        (const char *dsn, void **out_ctx);
     SqlRDBResult (*close)       (void *ctx);

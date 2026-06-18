@@ -23,6 +23,13 @@ if(SQLite3_VERSION VERSION_LESS "3.35.0")
         "Upgrade your libsqlite3-dev / sqlite-devel package.")
 endif()
 
+# Optional PostgreSQL (libpq) backend. Off by default so the standard build
+# needs only SQLite3. Enable with -DC2SQL_WITH_POSTGRES=ON (requires libpq-dev).
+option(C2SQL_WITH_POSTGRES "Build the PostgreSQL (libpq) driver" OFF)
+if(C2SQL_WITH_POSTGRES)
+    find_package(PostgreSQL REQUIRED)
+endif()
+
 add_subdirectory(src)
 
 enable_testing()

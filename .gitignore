@@ -32,6 +32,15 @@ Testing/
 .DS_Store
 Thumbs.db
 
+# Python bytecode (tools/)
+__pycache__/
+*.pyc
+
 # Claude Code internal files
 .claude/
 .kiro/
+
+# c2sql-gen demo artifacts are checked in (regenerable via tools/build_batch.sh).
+# Re-include them despite the global *.cmake / build rules above.
+!generated/
+!generated/*.cmake

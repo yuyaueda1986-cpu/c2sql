@@ -240,7 +240,7 @@ static void test_select_with_known_col(void) {
     SqlRDBCondition *cond = SqlRDBCondInt("id", SQL_OP_EQ, 7);
     TEST_ASSERT(cond != NULL);
 
-    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, cond, NULL, NULL };
+    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, cond, NULL, NULL, C2SQL_DIALECT_SQLITE };
     char   *sql        = NULL;
     size_t  bind_count = 0;
 
@@ -268,7 +268,7 @@ static void test_select_unknown_col(void) {
     SqlRDBCondition *cond = SqlRDBCondInt("nonexistent", SQL_OP_EQ, 1);
     TEST_ASSERT(cond != NULL);
 
-    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, cond, NULL, NULL };
+    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, cond, NULL, NULL, C2SQL_DIALECT_SQLITE };
     char   *sql        = NULL;
     size_t  bind_count = 0;
 
@@ -295,7 +295,7 @@ static void test_select_and_one_unknown_col(void) {
     SqlRDBCondition *and_c = SqlRDBCondAnd(a, b);
     TEST_ASSERT(and_c != NULL);
 
-    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, and_c, NULL, NULL };
+    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, and_c, NULL, NULL, C2SQL_DIALECT_SQLITE };
     char   *sql        = NULL;
     size_t  bind_count = 0;
 
@@ -322,7 +322,7 @@ static void test_select_or_both_known(void) {
     SqlRDBCondition *or_c = SqlRDBCondOr(a, b);
     TEST_ASSERT(or_c != NULL);
 
-    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, or_c, NULL, NULL };
+    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, or_c, NULL, NULL, C2SQL_DIALECT_SQLITE };
     char   *sql        = NULL;
     size_t  bind_count = 0;
 
@@ -349,7 +349,7 @@ static void test_select_cond_all_no_where(void) {
     SqlRDBCondition *all = SqlRDBCondAll();
     TEST_ASSERT(all != NULL);
 
-    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, all, NULL, NULL };
+    SqlRDBQuerySpec spec = { C2SQL_QB_SELECT, s, all, NULL, NULL, C2SQL_DIALECT_SQLITE };
     char   *sql        = NULL;
     size_t  bind_count = 99;
 
@@ -376,7 +376,7 @@ static void test_delete_unknown_col(void) {
     SqlRDBCondition *cond = SqlRDBCondText("bad_col", SQL_OP_EQ, "x");
     TEST_ASSERT(cond != NULL);
 
-    SqlRDBQuerySpec spec = { C2SQL_QB_DELETE, s, cond, NULL, NULL };
+    SqlRDBQuerySpec spec = { C2SQL_QB_DELETE, s, cond, NULL, NULL, C2SQL_DIALECT_SQLITE };
     char   *sql        = NULL;
     size_t  bind_count = 0;
 

@@ -46,6 +46,26 @@ ctest --test-dir build --output-on-failure
 
 成果物は`build/src/libc2sql.a`。公開ヘッダは`include/c2sql.h`のみ。
 
+### PostgreSQL バックエンド（任意）
+
+既定では SQLite3 のみでビルドする。libpq を用いた PostgreSQL ドライバを
+有効化するには `libpq-dev` を入れて `-DC2SQL_WITH_POSTGRES=ON` を渡す:
+
+```sh
+cmake -S . -B build -DC2SQL_WITH_POSTGRES=ON
+cmake --build build
+```
+
+利用側は接続文字列のスキームでバックエンドが切り替わる（API は不変）:
+
+```c
+SqlRDBHandle *h = SqlRDBInit("postgresql://user:pass@localhost:5432/mydb");
+/* "postgres://" も可。それ以外は SQLite パス/URI として扱う */
+```
+
+統合テスト（`tests/test_pg.c`）は環境変数 `C2SQL_PG_DSN` が設定されたときのみ
+実行され、未設定ならスキップされる。
+
 ### サニタイザビルド
 
 ASan + UBSan で全テストを実行する場合:
@@ -98,7 +118,21 @@ include/         公開ヘッダ (c2sql.h のみ)
 src/             ライブラリ本体
 tests/           単体・統合・並行・性能テスト
 examples/        サンプルプログラム
+tools/           c2sql-gen（スキーマ仕様書→定義コード生成バッチ）
+specs/           受け渡しスキーマ仕様書（JSON）
+generated/       c2sql-gen の生成物（再生成可能・DO NOT EDIT）
 docs/            設計書および取扱説明書
 .kiro/specs/     仕様（要件・設計・タスク）
 .kiro/steering/  プロジェクトコンテキスト
 ```
+
+## コード生成バッチ（c2sql-gen）
+
+利用者から受け取ったスキーマ仕様書（JSON）を、手書き `SqlRDBColumnDef[]` を
+排した定義コードへ変換する管理者向けバッチ。詳細は[tools/README.md](tools/README.md)。
+
+```sh
+tools/build_batch.sh            # specs/*.json を lint→生成→build→test
+```
+
+生成物を使う利用者コード例は `examples/generated_crud.c`。

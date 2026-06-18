@@ -15,7 +15,14 @@ target_include_directories(c2sql
     PUBLIC  ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_link_libraries(c2sql PRIVATE SQLite3::SQLite3)
+target_link_libraries(c2sql PRIVATE SQLite::SQLite3)
+
+# Optional PostgreSQL driver (gated by C2SQL_WITH_POSTGRES at the top level).
+if(C2SQL_WITH_POSTGRES)
+    target_sources(c2sql PRIVATE postgres_driver.c)
+    target_link_libraries(c2sql PRIVATE PostgreSQL::PostgreSQL)
+    target_compile_definitions(c2sql PRIVATE HAVE_POSTGRES=1)
+endif()
 
 # pthread required for mutex on non-Windows
 if(NOT WIN32)

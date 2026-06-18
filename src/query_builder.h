@@ -12,6 +12,7 @@
 #define C2SQL_QUERY_BUILDER_H
 
 #include "c2sql.h"
+#include "db_driver.h"
 #include "schema_registry.h"
 #include "condition_ast.h"
 #include <stddef.h>
@@ -22,6 +23,7 @@ typedef enum {
     C2SQL_QB_INSERT,        /* INSERT INTO ... VALUES (...)                   */
     C2SQL_QB_UPSERT,        /* INSERT INTO ... ON CONFLICT(...) DO UPDATE     */
     C2SQL_QB_SELECT,        /* SELECT ... FROM ... [WHERE ...]                */
+    C2SQL_QB_COUNT,         /* SELECT COUNT(*) FROM ... [WHERE ...]           */
     C2SQL_QB_DELETE,        /* DELETE FROM ... [WHERE ...]                    */
     C2SQL_QB_ALTER_ADD,     /* ALTER TABLE ... ADD COLUMN ...                 */
     C2SQL_QB_UPDATE_FIELD,  /* UPDATE table SET <target_col>=? WHERE ...      */
@@ -43,6 +45,7 @@ typedef struct {
     const SqlRDBCondition *cond;
     const SqlRDBColumnDef *new_col;
     const char            *target_col;  /* UPDATE_FIELD / SELECT_FIELD */
+    C2SqlDialect          dialect;      /* target SQL dialect (default SQLITE=0) */
 } SqlRDBQuerySpec;
 
 /*
