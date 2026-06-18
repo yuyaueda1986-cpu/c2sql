@@ -58,6 +58,10 @@ int main(void) {
 | `":memory:"` | プロセス内in-memory DB（テスト・キャッシュ用） |
 | `"path/to/file.db"` | 通常のSQLite3ファイル（無ければ作成） |
 | `"file:foo.db?mode=ro"` | URI形式（読み取り専用など） |
+| `"postgresql://user:pass@host:5432/db"` | PostgreSQL（`-DC2SQL_WITH_POSTGRES=ON` ビルド時。`postgres://` も可） |
+
+`postgresql://` / `postgres://` で始まる接続文字列は PostgreSQL ドライバを選択する。
+それ以外は SQLite として扱う。API・構造体・エラーコードはバックエンド非依存で不変。
 
 ---
 

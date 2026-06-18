@@ -61,7 +61,17 @@ static void buf_free(Buf *b) {
 /* Type and operator helpers                                           */
 /* ------------------------------------------------------------------ */
 
-static const char *type_to_sql_str(SqlRDBType t) {
+static const char *type_to_sql_str(SqlRDBType t, C2SqlDialect d) {
+    if (d == C2SQL_DIALECT_POSTGRES) {
+        switch (t) {
+            case SQL_TYPE_INT32: return "INTEGER";
+            case SQL_TYPE_INT64: return "BIGINT";
+            case SQL_TYPE_REAL:  return "DOUBLE PRECISION";
+            case SQL_TYPE_TEXT:  return "TEXT";
+            case SQL_TYPE_BLOB:  return "BYTEA";
+        }
+        return "TEXT";
+    }
     switch (t) {
         case SQL_TYPE_INT32:
         case SQL_TYPE_INT64: return "INTEGER";  /* SQLite uses INTEGER affinity */
@@ -70,6 +80,21 @@ static const char *type_to_sql_str(SqlRDBType t) {
         case SQL_TYPE_BLOB:  return "BLOB";
     }
     return "ANY";
+}
+
+/*
+ * Append the next bind placeholder: '?' for SQLite, '$N' for PostgreSQL
+ * (N = 1-based parameter index). Increments *bind_count first so the
+ * emitted index matches the eventual bind order.
+ */
+static bool append_placeholder(Buf *b, C2SqlDialect d, size_t *bind_count) {
+    (*bind_count)++;
+    if (d == C2SQL_DIALECT_POSTGRES) {
+        char tmp[16];
+        snprintf(tmp, sizeof(tmp), "$%zu", *bind_count);
+        return buf_append(b, tmp);
+    }
+    return buf_append(b, "?");
 }
 
 static const char *op_to_sql_str(SqlRDBOp op) {
@@ -143,7 +168,8 @@ static SqlRDBResult validate_cond_columns(const SqlRDBCondition *cond,
  * each ? placeholder emitted.
  * Returns true on success, false on OOM.
  */
-static bool append_cond(Buf *b, const SqlRDBCondition *cond, size_t *bind_count) {
+static bool append_cond(Buf *b, const SqlRDBCondition *cond,
+                        C2SqlDialect d, size_t *bind_count) {
     switch (cond->kind) {
         case COND_ALL:
             /* COND_ALL means no WHERE clause; callers must check for this */
@@ -154,17 +180,17 @@ static bool append_cond(Buf *b, const SqlRDBCondition *cond, size_t *bind_count)
             if (!buf_append(b, cond->u.leaf.col))                    return false;
             if (!buf_append(b, "\" "))                               return false;
             if (!buf_append(b, op_to_sql_str(cond->u.leaf.op)))      return false;
-            if (!buf_append(b, " ?"))                                 return false;
-            (*bind_count)++;
+            if (!buf_append(b, " "))                                  return false;
+            if (!append_placeholder(b, d, bind_count))               return false;
             return true;
 
         case COND_AND:
         case COND_OR: {
             const char *op_str = (cond->kind == COND_AND) ? " AND " : " OR ";
             if (!buf_append(b, "("))                                          return false;
-            if (!append_cond(b, cond->u.composite.left,  bind_count))        return false;
+            if (!append_cond(b, cond->u.composite.left,  d, bind_count))     return false;
             if (!buf_append(b, op_str))                                       return false;
-            if (!append_cond(b, cond->u.composite.right, bind_count))        return false;
+            if (!append_cond(b, cond->u.composite.right, d, bind_count))     return false;
             if (!buf_append(b, ")"))                                          return false;
             return true;
         }
@@ -196,11 +222,16 @@ static SqlRDBResult build_create(const SqlRDBQuerySpec *spec, Buf *b) {
         if (!buf_append(b, "\""))                        return SQL_RDB_ERR_NO_MEMORY;
         if (!buf_append(b, s->cols[i].name))             return SQL_RDB_ERR_NO_MEMORY;
         if (!buf_append(b, "\" "))                       return SQL_RDB_ERR_NO_MEMORY;
-        if (!buf_append(b, type_to_sql_str(s->cols[i].type))) return SQL_RDB_ERR_NO_MEMORY;
+        if (!buf_append(b, type_to_sql_str(s->cols[i].type, spec->dialect))) return SQL_RDB_ERR_NO_MEMORY;
         if (!append_col_constraints(b, &s->cols[i]))     return SQL_RDB_ERR_NO_MEMORY;
     }
 
-    if (!buf_append(b, ") STRICT"))                      return SQL_RDB_ERR_NO_MEMORY;
+    /* STRICT is SQLite-only (PostgreSQL is statically typed already). */
+    if (spec->dialect == C2SQL_DIALECT_POSTGRES) {
+        if (!buf_append(b, ")"))                         return SQL_RDB_ERR_NO_MEMORY;
+    } else {
+        if (!buf_append(b, ") STRICT"))                  return SQL_RDB_ERR_NO_MEMORY;
+    }
     return SQL_RDB_OK;
 }
 
@@ -213,7 +244,7 @@ static SqlRDBResult build_alter_add(const SqlRDBQuerySpec *spec, Buf *b) {
     if (!buf_append(b, "\" ADD COLUMN \""))              return SQL_RDB_ERR_NO_MEMORY;
     if (!buf_append(b, col->name))                       return SQL_RDB_ERR_NO_MEMORY;
     if (!buf_append(b, "\" "))                           return SQL_RDB_ERR_NO_MEMORY;
-    if (!buf_append(b, type_to_sql_str(col->type)))      return SQL_RDB_ERR_NO_MEMORY;
+    if (!buf_append(b, type_to_sql_str(col->type, spec->dialect))) return SQL_RDB_ERR_NO_MEMORY;
     if (!append_col_constraints(b, col))                 return SQL_RDB_ERR_NO_MEMORY;
     return SQL_RDB_OK;
 }
@@ -239,12 +270,11 @@ static SqlRDBResult build_insert(const SqlRDBQuerySpec *spec, Buf *b,
 
     if (!buf_append(b, ") VALUES ("))      return SQL_RDB_ERR_NO_MEMORY;
     for (size_t i = 0; i < s->col_count; i++) {
-        if (i > 0 && !buf_append(b, ",")) return SQL_RDB_ERR_NO_MEMORY;
-        if (!buf_append(b, "?"))           return SQL_RDB_ERR_NO_MEMORY;
+        if (i > 0 && !buf_append(b, ","))             return SQL_RDB_ERR_NO_MEMORY;
+        if (!append_placeholder(b, spec->dialect, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
     }
     if (!buf_append(b, ")"))              return SQL_RDB_ERR_NO_MEMORY;
 
-    *bind_count = s->col_count;
     return SQL_RDB_OK;
 }
 
@@ -298,7 +328,7 @@ static SqlRDBResult build_select(const SqlRDBQuerySpec *spec, Buf *b,
         SqlRDBResult vr = validate_cond_columns(cond, s);
         if (vr != SQL_RDB_OK) return vr;
         if (!buf_append(b, " WHERE "))     return SQL_RDB_ERR_NO_MEMORY;
-        if (!append_cond(b, cond, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
+        if (!append_cond(b, cond, spec->dialect, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
     }
 
     return SQL_RDB_OK;
@@ -317,7 +347,7 @@ static SqlRDBResult build_count(const SqlRDBQuerySpec *spec, Buf *b,
         SqlRDBResult vr = validate_cond_columns(cond, s);
         if (vr != SQL_RDB_OK) return vr;
         if (!buf_append(b, " WHERE "))             return SQL_RDB_ERR_NO_MEMORY;
-        if (!append_cond(b, cond, bind_count))     return SQL_RDB_ERR_NO_MEMORY;
+        if (!append_cond(b, cond, spec->dialect, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
     }
     return SQL_RDB_OK;
 }
@@ -334,14 +364,14 @@ static SqlRDBResult build_update_field(const SqlRDBQuerySpec *spec, Buf *b,
     if (!buf_append(b, s->name))       return SQL_RDB_ERR_NO_MEMORY;
     if (!buf_append(b, "\" SET \""))   return SQL_RDB_ERR_NO_MEMORY;
     if (!buf_append(b, col))           return SQL_RDB_ERR_NO_MEMORY;
-    if (!buf_append(b, "\"=?"))        return SQL_RDB_ERR_NO_MEMORY;
-    *bind_count = 1;
+    if (!buf_append(b, "\"="))         return SQL_RDB_ERR_NO_MEMORY;
+    if (!append_placeholder(b, spec->dialect, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
 
     if (cond_needs_where(cond)) {
         SqlRDBResult vr = validate_cond_columns(cond, s);
         if (vr != SQL_RDB_OK) return vr;
         if (!buf_append(b, " WHERE "))         return SQL_RDB_ERR_NO_MEMORY;
-        if (!append_cond(b, cond, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
+        if (!append_cond(b, cond, spec->dialect, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
     }
     return SQL_RDB_OK;
 }
@@ -364,7 +394,7 @@ static SqlRDBResult build_select_field(const SqlRDBQuerySpec *spec, Buf *b,
         SqlRDBResult vr = validate_cond_columns(cond, s);
         if (vr != SQL_RDB_OK) return vr;
         if (!buf_append(b, " WHERE "))         return SQL_RDB_ERR_NO_MEMORY;
-        if (!append_cond(b, cond, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
+        if (!append_cond(b, cond, spec->dialect, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
     }
     return SQL_RDB_OK;
 }
@@ -382,7 +412,7 @@ static SqlRDBResult build_delete(const SqlRDBQuerySpec *spec, Buf *b,
         SqlRDBResult vr = validate_cond_columns(cond, s);
         if (vr != SQL_RDB_OK) return vr;
         if (!buf_append(b, " WHERE "))    return SQL_RDB_ERR_NO_MEMORY;
-        if (!append_cond(b, cond, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
+        if (!append_cond(b, cond, spec->dialect, bind_count)) return SQL_RDB_ERR_NO_MEMORY;
     }
 
     return SQL_RDB_OK;

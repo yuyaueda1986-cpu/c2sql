@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite:
+    name: SQLite build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build libsqlite3-dev sqlite3 python3
+
+      - name: Lint schema specs
+        run: python3 tools/c2sql_lint.py specs/*.json
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test (includes tools_pytests golden check)
+        run: ctest --test-dir build --output-on-failure
+
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build libsqlite3-dev python3
+
+      - name: Configure (sanitizers)
+        run: cmake -S . -B build-asan -G Ninja -DC2SQL_SANITIZE=ON
+
+      - name: Build
+        run: cmake --build build-asan
+
+      - name: Test
+        run: ctest --test-dir build-asan --output-on-failure
+
+  postgres:
+    name: PostgreSQL build & test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: c2sql_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      C2SQL_PG_DSN: postgresql://postgres:postgres@localhost:5432/c2sql_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build libsqlite3-dev libpq-dev python3
+
+      - name: Configure (with PostgreSQL driver)
+        run: cmake -S . -B build-pg -G Ninja -DC2SQL_WITH_POSTGRES=ON
+
+      - name: Build
+        run: cmake --build build-pg
+
+      - name: Test (SQLite + PostgreSQL integration)
+        run: ctest --test-dir build-pg --output-on-failure

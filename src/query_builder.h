@@ -12,6 +12,7 @@
 #define C2SQL_QUERY_BUILDER_H
 
 #include "c2sql.h"
+#include "db_driver.h"
 #include "schema_registry.h"
 #include "condition_ast.h"
 #include <stddef.h>
@@ -44,6 +45,7 @@ typedef struct {
     const SqlRDBCondition *cond;
     const SqlRDBColumnDef *new_col;
     const char            *target_col;  /* UPDATE_FIELD / SELECT_FIELD */
+    C2SqlDialect          dialect;      /* target SQL dialect (default SQLITE=0) */
 } SqlRDBQuerySpec;
 
 /*

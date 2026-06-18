@@ -95,3 +95,11 @@ if(Python3_FOUND)
     add_test(NAME tools_pytests
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_tools.py)
 endif()
+
+# Phase 3: PostgreSQL backend integration test. Built only when the libpq
+# driver is compiled in; self-skips at runtime unless C2SQL_PG_DSN is set.
+if(C2SQL_WITH_POSTGRES)
+    add_executable(test_pg test_pg.c)
+    target_link_libraries(test_pg PRIVATE c2sql)
+    add_test(NAME pg_tests COMMAND test_pg)
+endif()

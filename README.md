@@ -46,6 +46,26 @@ ctest --test-dir build --output-on-failure
 
 成果物は`build/src/libc2sql.a`。公開ヘッダは`include/c2sql.h`のみ。
 
+### PostgreSQL バックエンド（任意）
+
+既定では SQLite3 のみでビルドする。libpq を用いた PostgreSQL ドライバを
+有効化するには `libpq-dev` を入れて `-DC2SQL_WITH_POSTGRES=ON` を渡す:
+
+```sh
+cmake -S . -B build -DC2SQL_WITH_POSTGRES=ON
+cmake --build build
+```
+
+利用側は接続文字列のスキームでバックエンドが切り替わる（API は不変）:
+
+```c
+SqlRDBHandle *h = SqlRDBInit("postgresql://user:pass@localhost:5432/mydb");
+/* "postgres://" も可。それ以外は SQLite パス/URI として扱う */
+```
+
+統合テスト（`tests/test_pg.c`）は環境変数 `C2SQL_PG_DSN` が設定されたときのみ
+実行され、未設定ならスキップされる。
+
 ### サニタイザビルド
 
 ASan + UBSan で全テストを実行する場合:

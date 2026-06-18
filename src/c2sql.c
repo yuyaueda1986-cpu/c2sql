@@ -11,6 +11,9 @@
 #include "c2sql.h"
 #include "handle_internal.h"
 #include "sqlite_driver.h"
+#ifdef HAVE_POSTGRES
+#include "postgres_driver.h"
+#endif
 #include "query_builder.h"
 #include "type_mapping.h"
 #include "condition_ast.h"
@@ -21,6 +24,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * Pick a backend driver from the connection string. A "postgresql://" or
+ * "postgres://" prefix selects the PostgreSQL driver (when compiled in);
+ * everything else is treated as a SQLite path / URI. Returns NULL when a
+ * PostgreSQL DSN is given but the library was built without libpq support.
+ */
+static bool dsn_is_postgres(const char *dsn) {
+    return strncmp(dsn, "postgresql://", 13) == 0 ||
+           strncmp(dsn, "postgres://",   11) == 0;
+}
+
+static const SqlRDBDriver *select_driver(const char *dsn) {
+    if (dsn_is_postgres(dsn)) {
+#ifdef HAVE_POSTGRES
+        return &g_postgres_driver;
+#else
+        return NULL;
+#endif
+    }
+    return &g_sqlite3_driver;
+}
 
 /* ------------------------------------------------------------------ */
 /* SqlRDBStmt — opaque multi-row iterator (Task 10.3)                 */
@@ -119,7 +144,8 @@ static bool live_contains(const SqlRDBHandle *h) {
 SqlRDBHandle *SqlRDBInit(const char *connection_string) {
     if (connection_string == NULL) return NULL;
 
-    const SqlRDBDriver *drv = &g_sqlite3_driver;
+    const SqlRDBDriver *drv = select_driver(connection_string);
+    if (drv == NULL) return NULL;  /* e.g. postgres DSN but built without libpq */
 
     void *driver_ctx = NULL;
     if (drv->open(connection_string, &driver_ctx) != SQL_RDB_OK) return NULL;
@@ -427,7 +453,8 @@ SqlRDBResult SqlRDBWrite(SqlRDBHandle *h, const char *struct_name,
     C2SqlQBOp op = (schema->pk_index >= 0) ? C2SQL_QB_UPSERT : C2SQL_QB_INSERT;
 
     char *sql = NULL;
-    SqlRDBQuerySpec spec = { .op = op, .schema = schema, .cond = NULL, .new_col = NULL };
+    SqlRDBQuerySpec spec = { .op = op, .schema = schema, .cond = NULL, .new_col = NULL,
+                              .dialect = h->driver->dialect };
     SqlRDBResult r = c2sql_internal_qb_build(&spec, &sql, NULL);
     if (r != SQL_RDB_OK) {
         c2sql_internal_mutex_unlock(&h->mutex);
@@ -482,7 +509,8 @@ SqlRDBResult SqlRDBWriteMany(SqlRDBHandle *h, const char *struct_name,
     C2SqlQBOp op = (schema->pk_index >= 0) ? C2SQL_QB_UPSERT : C2SQL_QB_INSERT;
 
     char *sql = NULL;
-    SqlRDBQuerySpec spec = { .op = op, .schema = schema, .cond = NULL, .new_col = NULL };
+    SqlRDBQuerySpec spec = { .op = op, .schema = schema, .cond = NULL, .new_col = NULL,
+                              .dialect = h->driver->dialect };
     SqlRDBResult r = c2sql_internal_qb_build(&spec, &sql, NULL);
     if (r != SQL_RDB_OK) {
         c2sql_internal_mutex_unlock(&h->mutex);
@@ -562,7 +590,8 @@ SqlRDBResult SqlRDBRead(SqlRDBHandle *h, const char *struct_name,
 
     char *sql = NULL;
     SqlRDBQuerySpec spec = { .op = C2SQL_QB_SELECT, .schema = schema,
-                              .cond = cond, .new_col = NULL };
+                              .cond = cond, .new_col = NULL,
+                              .dialect = h->driver->dialect };
     SqlRDBResult r = c2sql_internal_qb_build(&spec, &sql, NULL);
     if (r != SQL_RDB_OK) {
         c2sql_internal_mutex_unlock(&h->mutex);
@@ -687,7 +716,8 @@ SqlRDBResult SqlRDBReadMany(SqlRDBHandle *h, const char *struct_name,
 
     char *sql = NULL;
     SqlRDBQuerySpec spec = { .op = C2SQL_QB_SELECT, .schema = schema,
-                              .cond = cond, .new_col = NULL };
+                              .cond = cond, .new_col = NULL,
+                              .dialect = h->driver->dialect };
     SqlRDBResult r = c2sql_internal_qb_build(&spec, &sql, NULL);
     if (r != SQL_RDB_OK) {
         c2sql_internal_mutex_unlock(&h->mutex);
@@ -788,7 +818,8 @@ SqlRDBResult SqlRDBDelete(SqlRDBHandle *h, const char *struct_name,
 
     char *sql = NULL;
     SqlRDBQuerySpec spec = { .op = C2SQL_QB_DELETE, .schema = schema,
-                              .cond = cond, .new_col = NULL };
+                              .cond = cond, .new_col = NULL,
+                              .dialect = h->driver->dialect };
     SqlRDBResult r = c2sql_internal_qb_build(&spec, &sql, NULL);
     if (r != SQL_RDB_OK) {
         c2sql_internal_mutex_unlock(&h->mutex);
@@ -850,7 +881,8 @@ SqlRDBResult SqlRDBCount(SqlRDBHandle *h, const char *struct_name,
 
     char *sql = NULL;
     SqlRDBQuerySpec spec = { .op = C2SQL_QB_COUNT, .schema = schema,
-                              .cond = cond, .new_col = NULL };
+                              .cond = cond, .new_col = NULL,
+                              .dialect = h->driver->dialect };
     SqlRDBResult r = c2sql_internal_qb_build(&spec, &sql, NULL);
     if (r != SQL_RDB_OK) {
         c2sql_internal_mutex_unlock(&h->mutex);
@@ -1032,6 +1064,7 @@ static SqlRDBResult count_matching_rows(SqlRDBHandle *h,
         .cond       = cond,
         .new_col    = NULL,
         .target_col = target_col,
+        .dialect    = h->driver->dialect,
     };
     SqlRDBResult r = c2sql_internal_qb_build(&spec, &sql, NULL);
     if (r != SQL_RDB_OK) return r;
@@ -1105,6 +1138,7 @@ SqlRDBResult SqlRDBWriteBlobField(SqlRDBHandle *h, const char *struct_name,
         .cond       = key,
         .new_col    = NULL,
         .target_col = col_name,
+        .dialect    = h->driver->dialect,
     };
     r = c2sql_internal_qb_build(&spec, &sql, NULL);
     if (r != SQL_RDB_OK) { c2sql_internal_mutex_unlock(&h->mutex); return r; }
@@ -1181,6 +1215,7 @@ SqlRDBResult SqlRDBReadBlobField(SqlRDBHandle *h, const char *struct_name,
         .cond       = key,
         .new_col    = NULL,
         .target_col = col_name,
+        .dialect    = h->driver->dialect,
     };
     SqlRDBResult r = c2sql_internal_qb_build(&spec, &sql, NULL);
     if (r != SQL_RDB_OK) { c2sql_internal_mutex_unlock(&h->mutex); return r; }
