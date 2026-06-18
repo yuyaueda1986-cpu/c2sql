@@ -1,0 +1,26 @@
+# Central clang-tidy configuration (single source of truth for the CMake
+# `tidy` target and the CI static-analysis job).
+#
+# Rationale for non-obvious entries:
+#   -bugprone-easily-swappable-parameters: fires on every multi-arg C API; a C
+#     library has no overloading, so this is unavoidable noise.
+#   -bugprone-reserved-identifier: _POSIX_C_SOURCE is the POSIX feature-test
+#     macro; the leading underscore is mandated by the standard.
+#   -clang-analyzer-security.insecureAPI.{strcpy,DeprecatedOrUnsafeBufferHandling}:
+#     the C11 Annex K *_s variants are not provided by glibc; we rely on bounded
+#     snprintf/memcpy with explicit length arguments instead.
+#   bugprone-sizeof-expression.WarnOnSizeOfPointerToAggregate=false: the codebase
+#     allocates arrays of pointers with the idiomatic `sizeof(*ptr_to_ptr)`; the
+#     newer check flags this pattern as a false positive.
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  -clang-analyzer-security.insecureAPI.strcpy,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+WarningsAsErrors: '*'
+# Analyze translation units (.c) only, matching the original tidy scope.
+HeaderFilterRegex: ''
+CheckOptions:
+  bugprone-sizeof-expression.WarnOnSizeOfPointerToAggregate: 'false'

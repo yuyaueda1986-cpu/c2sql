@@ -282,8 +282,10 @@ PostgreSQL 無効ビルドで PostgreSQL DSN を渡すと `SqlRDBInit` は `NULL
 
 ### CI
 
-`.github/workflows/ci.yml` で次の3ジョブを実行する: ①SQLiteビルド＋ctest（ツール
-ゴールデンテスト含む）、②ASan/UBSan、③PostgreSQLサービスコンテナを用いた統合テスト。
+`.github/workflows/ci.yml` で次の4ジョブを実行する: ①SQLiteビルド＋ctest（ツール
+ゴールデンテスト含む）、②ASan/UBSan、③clang-tidy＋cppcheck（チェック設定は
+リポジトリ直下の `.clang-tidy`、`WarningsAsErrors: '*'`）、④PostgreSQLサービス
+コンテナを用いた統合テスト。
 
 ## 性能・拡張性
 

@@ -19,6 +19,9 @@ void c2sql_internal_err_set(SqlRDBErrorCtx *e, SqlRDBResult code, const char *fm
     }
     va_list ap;
     va_start(ap, fmt);
+    /* va_start above initializes ap on every path reaching the call below;
+     * the analyzer's uninitialized-va_list report is a false positive. */
+    /* NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized) */
     vsnprintf(e->message, sizeof(e->message), fmt, ap);
     va_end(ap);
     /* vsnprintf always NUL-terminates on POSIX; enforce on Windows too */

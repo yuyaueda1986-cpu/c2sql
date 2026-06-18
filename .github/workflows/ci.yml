@@ -54,6 +54,28 @@ jobs:
       - name: Test
         run: ctest --test-dir build-asan --output-on-failure
 
+  static-analysis:
+    name: clang-tidy + cppcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build libsqlite3-dev libpq-dev clang-tidy cppcheck
+
+      # Configure with the PostgreSQL backend so postgres_driver.c is analyzed too.
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DC2SQL_WITH_POSTGRES=ON
+
+      - name: clang-tidy
+        run: cmake --build build --target tidy
+
+      - name: cppcheck
+        run: cmake --build build --target cppcheck
+
   postgres:
     name: PostgreSQL build & test
     runs-on: ubuntu-latest

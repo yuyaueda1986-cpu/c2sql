@@ -259,21 +259,21 @@ static SqlRDBResult pg_step(void *stmt, bool *out_has_row) {
 }
 
 static SqlRDBResult pg_column_int64(void *stmt, int index, int64_t *out) {
-    PgStmt *s = stmt;
+    const PgStmt *s = stmt;
     *out = PQgetisnull(s->res, s->row, index)
            ? 0 : (int64_t)strtoll(PQgetvalue(s->res, s->row, index), NULL, 10);
     return SQL_RDB_OK;
 }
 
 static SqlRDBResult pg_column_int32(void *stmt, int index, int32_t *out) {
-    PgStmt *s = stmt;
+    const PgStmt *s = stmt;
     *out = PQgetisnull(s->res, s->row, index)
            ? 0 : (int32_t)strtoll(PQgetvalue(s->res, s->row, index), NULL, 10);
     return SQL_RDB_OK;
 }
 
 static SqlRDBResult pg_column_real(void *stmt, int index, double *out) {
-    PgStmt *s = stmt;
+    const PgStmt *s = stmt;
     *out = PQgetisnull(s->res, s->row, index)
            ? 0.0 : strtod(PQgetvalue(s->res, s->row, index), NULL);
     return SQL_RDB_OK;
@@ -281,7 +281,7 @@ static SqlRDBResult pg_column_real(void *stmt, int index, double *out) {
 
 static SqlRDBResult pg_column_text(void *stmt, int index,
                                    const char **out_ptr, size_t *out_len) {
-    PgStmt *s = stmt;
+    const PgStmt *s = stmt;
     *out_ptr = PQgetvalue(s->res, s->row, index);
     *out_len = (size_t)PQgetlength(s->res, s->row, index);
     return SQL_RDB_OK;
@@ -307,7 +307,7 @@ static SqlRDBResult pg_column_blob(void *stmt, int index,
 }
 
 static SqlRDBResult pg_column_isnull(void *stmt, int index, bool *out) {
-    PgStmt *s = stmt;
+    const PgStmt *s = stmt;
     *out = PQgetisnull(s->res, s->row, index) != 0;
     return SQL_RDB_OK;
 }

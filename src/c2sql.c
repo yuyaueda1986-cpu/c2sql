@@ -111,7 +111,7 @@ static bool live_register(SqlRDBHandle *h) {
     return true;
 }
 
-static bool live_remove(SqlRDBHandle *h) {
+static bool live_remove(const SqlRDBHandle *h) {
     pthread_mutex_lock(&g_live_mutex);
     for (size_t i = 0; i < g_live_count; i++) {
         if (g_live_handles[i] == h) {

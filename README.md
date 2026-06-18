@@ -81,9 +81,12 @@ ctest --test-dir build-asan
 clang-tidyおよびcppcheck（インストール済みの場合）:
 
 ```sh
-cmake --build build --target tidy
+cmake --build build --target tidy      # チェック設定は .clang-tidy（単一の真実）
 cmake --build build --target cppcheck
 ```
+
+両者とも警告ゼロ（`WarningsAsErrors: '*'`）。PostgreSQLドライバも解析対象にするには
+`-DC2SQL_WITH_POSTGRES=ON` で構成する。CI（`.github/workflows/ci.yml`）で常時検証される。
 
 ## サンプル
 
